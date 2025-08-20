@@ -5,4 +5,5 @@ pandas
 scikit-learn
 plotly
 python-dotenv
-
+vaderSentiment
+numpy
