@@ -7,14 +7,12 @@ import pandas as pd
 import numpy as np
 from sklearn.linear_model import LogisticRegression
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
-
 import requests
 
 # Load environment variables
 load_dotenv()
 
 app = FastAPI()
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 analyzer = SentimentIntensityAnalyzer()
 
 # Enable CORS
@@ -79,36 +77,25 @@ def predict_next_day(df):
     return {"prediction": "UP" if pred == 1 else "DOWN", "confidence": round(float(prob) * 100, 2)}
 
 # ----- Sentiment Analysis -----
-# ----- Sentiment Analysis (Improved with Fallback & Debug) -----
-
-
 def get_stock_sentiment(symbol):
     try:
         sentiments = []
         news = []
 
-        # 1. Try Yahoo Finance news
+        # Yahoo Finance news
         stock = yf.Ticker(symbol)
         if hasattr(stock, 'news') and stock.news:
             news = stock.news
-            print(f"[DEBUG] Found {len(news)} Yahoo news articles.")
-        else:
-            print("[DEBUG] No Yahoo news found, trying fallback API...")
-
-        # 2. Fallback to NewsAPI if no Yahoo news
+        # Fallback to NewsAPI
         if not news:
-            API_KEY = os.getenv("NEWSAPI_KEY")  # Make sure to set this in .env
+            API_KEY = os.getenv("NEWSAPI_KEY")
             if API_KEY:
                 url = f"https://newsapi.org/v2/everything?q={symbol}&language=en&sortBy=publishedAt&apiKey={API_KEY}"
                 r = requests.get(url)
                 data = r.json()
                 news = [{"title": a["title"], "link": a["url"]} for a in data.get("articles", [])]
-                print(f"[DEBUG] Found {len(news)} fallback news articles.")
-            else:
-                print("[DEBUG] No fallback API key provided.")
 
-        # 3. Process sentiment
-        news = news[:10]  # take latest 10
+        news = news[:10]
         for article in news:
             title = article.get('title', 'No title')
             score = analyzer.polarity_scores(title)
@@ -122,12 +109,7 @@ def get_stock_sentiment(symbol):
             return {"average_score": 0, "sentiment": "Neutral", "news": []}
 
         avg_score = np.mean([s['score'] for s in sentiments])
-
-        # Lower threshold for testing
         sentiment_label = "Bullish" if avg_score > 0.01 else "Bearish" if avg_score < 0.01 else "Neutral"
-
-        print(f"[DEBUG] Sentiment scores: {[round(s['score'], 3) for s in sentiments]}")
-        print(f"[DEBUG] Average score: {avg_score}, Sentiment: {sentiment_label}")
 
         return {
             "average_score": avg_score,
@@ -136,10 +118,7 @@ def get_stock_sentiment(symbol):
         }
 
     except Exception as e:
-        print(f"[ERROR] Sentiment analysis failed: {e}")
         return {"average_score": 0, "sentiment": "Neutral", "news": []}
-
-
 
 # ----- Joji Indicator -----
 def calculate_joji_indicator(df):
@@ -160,27 +139,7 @@ def calculate_joji_indicator(df):
     else:
         signal = "Neutral"
 
-    return {
-        "value": round(float(latest_joji), 2),
-        "signal": signal
-    }
-
-# ----- AI Summary Generation -----
-def generate_ai_summary(text: str) -> str:
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You are a helpful stock market analyst."},
-                {"role": "user", "content": text},
-            ],
-            max_tokens=100,
-            temperature=0.7,
-        )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        print(f"OpenAI API error: {e}")
-        return "No AI summary available at this time."
+    return {"value": round(float(latest_joji), 2), "signal": signal}
 
 # ----- Main Stock Endpoint -----
 @app.get("/stock/{symbol}")
@@ -212,26 +171,11 @@ def get_stock_data(symbol: str, timeframe: str = Query("2m")):
         raw_patterns = ohlc[ohlc['Pattern'].notnull()].tail(50)
         detected_patterns = []
         for _, row in raw_patterns.iterrows():
-            try:
-                detected_patterns.append({
-                    "Date": str(row["Date"]),
-                    "Pattern": row["Pattern"],
-                    "Price": float(row["High"])
-                })
-            except Exception:
-                continue
-
-        summary_input = (
-            f"Analyze the following stock data and provide a concise market summary:\n"
-            f"Stock symbol: {symbol}\n"
-            f"Sentiment: {sentiment['sentiment']}\n"
-            f"Prediction: {next_day_pred['prediction']} with confidence {next_day_pred['confidence']}%\n"
-            f"Support level: {support}\n"
-            f"Resistance level: {resistance}\n"
-            f"Joji Indicator: {joji_indicator}\n"
-        )
-
-        ai_summary = generate_ai_summary(summary_input)
+            detected_patterns.append({
+                "Date": str(row["Date"]),
+                "Pattern": row["Pattern"],
+                "Price": float(row["High"])
+            })
 
         return {
             "symbol": symbol,
@@ -242,14 +186,13 @@ def get_stock_data(symbol: str, timeframe: str = Query("2m")):
             "sentiment": sentiment,
             "support": round(float(support), 2) if support else None,
             "resistance": round(float(resistance), 2) if resistance else None,
-            "ai_summary": ai_summary,
             "joji_indicator": joji_indicator
         }
 
     except Exception as e:
         return {"error": str(e)}
 
-# ----- New Patterns Endpoint -----
+# ----- Patterns Endpoint -----
 @app.get("/patterns/{symbol}")
 def get_patterns(
     symbol: str,
@@ -268,7 +211,6 @@ def get_patterns(
             return {"error": "No data for symbol"}
 
         df = detect_patterns(df)
-
         filtered = df[df['Pattern'] == pattern]
 
         patterns_list = []
