@@ -7,7 +7,7 @@ import pandas as pd
 import numpy as np
 from sklearn.linear_model import LogisticRegression
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
-from openai import OpenAI
+
 import requests
 
 # Load environment variables
